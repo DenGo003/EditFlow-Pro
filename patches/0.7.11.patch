@@ -1,0 +1,90 @@
+--- a/backend/timeline_caption.py
++++ b/backend/timeline_caption.py
+@@ -43,7 +43,7 @@
+     filt=folder/'caption-audio-filter.txt';filt.write_text(';\n'.join(filters),encoding='utf-8')
+     wav=folder/'active-sequence-audio.wav'
+     update('Extracting selected timeline audio (no video render)',0,2)
+-    core.run(args+['-filter_complex_script',str(filt),'-map','[out]','-t',f'{duration:.6f}','-c:a','pcm_s16le',str(wav)],cancel)
++    core.run(args+['-/filter_complex',str(filt),'-map','[out]','-t',f'{duration:.6f}','-c:a','pcm_s16le',str(wav)],cancel)
+     update('Transcribing active sequence using local Whisper',1,2)
+     result=core.transcribe(str(wav),model_dir,language,word_mode,folder,update,cancel,ffmpeg,ffprobe)
+     result['note']='SRT is timed to the selected active Premiere sequence. Imported SRT still needs placing on a caption track.'
+--- a/backend/timeline_cut.py
++++ b/backend/timeline_cut.py
+@@ -138,7 +138,7 @@
+     filter_script.write_text(';\n'.join(sections),encoding='utf-8')
+     wav=folder/'timeline-captions-audio.wav'
+     update('Building cut microphone audio for captions (no video render)',0,2)
+-    core.run([ffmpeg,'-y','-hide_banner','-nostdin','-i',str(source),'-filter_complex_script',str(filter_script),'-map','[out]','-c:a','pcm_s16le',str(wav)],cancel)
++    core.run([ffmpeg,'-y','-hide_banner','-nostdin','-i',str(source),'-/filter_complex',str(filter_script),'-map','[out]','-c:a','pcm_s16le',str(wav)],cancel)
+     update('Transcribing cut timeline with local Whisper',1,2)
+     result=core.transcribe(str(wav),model_dir,language,word_mode,folder,update,cancel,ffmpeg,ffprobe)
+     result['plan']=str(plan_path)
+--- a/backend/server.py
++++ b/backend/server.py
+@@ -124,7 +124,7 @@
+             if not self.authorized(): return
+             try:
+                 if self.path=='/health':
+-                    self.reply(200,{'version':'0.7.9-null-duration-fix','model_ready':(service.root/'models/small/model.bin').is_file(),
++                    self.reply(200,{'version':'0.7.11-ffmpeg-powershell-autolaunch','model_ready':(service.root/'models/small/model.bin').is_file(),
+                                     'ffmpeg':bool(shutil.which(service.ffmpeg)),'ffprobe':bool(shutil.which(service.ffprobe)),
+                                     'output_root':str(service.work_root/'outputs')})
+                 elif self.path.startswith('/jobs/'): self.reply(200,service.status(self.path.split('/')[-1]))
+--- a/plugin/main.js
++++ b/plugin/main.js
+@@ -326,8 +326,31 @@
+  const file=n.path.join(stage,'EditFlow-Pro-Update.zip');n.fs.writeFileSync(file,zip);
+  const worker=n.path.join(n.path.dirname(decodeURIComponent(location.pathname.replace(/^\//,'')).replace(/\//g,'\\')),'Run-Online-Update.ps1');
+  if(!n.fs.existsSync(worker))throw Error('Updater worker missing. Reinstall this update once.');
+- r.textContent='Verified '+latestPackage.tag+'\nInstaller queued. SAVE your project and CLOSE ALL Premiere windows to install. Reopen after completion.';
+- const child=n.cp.spawn('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',worker,'-Archive',file,'-Tag',latestPackage.tag],{detached:true,windowsHide:true,stdio:'ignore'});child.unref();
++ // Launch the exact PowerShell installer used for the successful manual repairs.
++ // Absolute path avoids CEP's sometimes-restricted PATH; stdout/stderr are persistent.
++ const systemRoot=process.env.SystemRoot||process.env.WINDIR||'C:\\Windows';
++ const ps=n.path.join(systemRoot,'System32','WindowsPowerShell','v1.0','powershell.exe');
++ if(!n.fs.existsSync(ps))throw Error('Windows PowerShell not found: '+ps);
++ const logPath=n.path.join(process.env.LOCALAPPDATA,'EditFlowPro','online-update-launch.log');
++ const fd=n.fs.openSync(logPath,'a');
++ n.fs.writeSync(fd,'\nLaunching '+latestPackage.tag+' at '+new Date().toISOString()+'\n');
++ let child;
++ try {
++  child=n.cp.spawn(ps,['-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',worker,'-Archive',file,'-Tag',latestPackage.tag],{
++   detached:true,windowsHide:true,stdio:['ignore',fd,fd]
++  });
++ } catch(e){n.fs.closeSync(fd);throw Error('Failed to launch PowerShell installer: '+e.message);}
++ n.fs.closeSync(fd);
++ await new Promise((resolve,reject)=>{
++  let settled=false;
++  child.once('spawn',()=>{settled=true;resolve();});
++  child.once('error',e=>{try{n.fs.appendFileSync(logPath,'Spawn error: '+e.message+'\n');}catch(ignore){}
++   if(!settled){settled=true;reject(Error('PowerShell installer did not start: '+e.message));}});
++  child.once('exit',(code)=>{if(code!==0)try{n.fs.appendFileSync(logPath,'Installer process exited with code '+code+'; see online-update.log\n');}catch(ignore){}});
++ });
++ if(!child.pid)throw Error('PowerShell installer did not return a process ID.');
++ child.unref();
++ r.textContent='Verified '+latestPackage.tag+'\nPowerShell installer started (PID '+child.pid+'). SAVE your project and CLOSE ALL Premiere windows. Check online-update.log for SUCCESS/FAILED before reopening.';
+ });
+ bind('open-release',async()=>{
+  if(!latestReleaseURL||!/^https:\/\/github\.com\/DenGo003\/EditFlow-Pro\/releases\//.test(latestReleaseURL))throw Error('No verified release URL.');
+--- a/plugin/index.html
++++ b/plugin/index.html
+@@ -1,6 +1,6 @@
+ <!DOCTYPE html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="styles.css"></head><body>
+ <header><span class="brand">E</span><div><h2>EditFlow <span class="accent">Pro</span></h2><p class="muted">TIMELINE ENGINE / SAFE PREVIEW</p></div></header>
+-<div class="layout"><nav><button data-view="timeline">Timeline Engine</button><button data-view="cut" class="selected" data-i18n="autoCut">Auto Cut</button><button data-view="sync">Auto Sync</button><button data-view="sync-after">Smart Sync After Cut</button><button data-view="captions" data-i18n="captions">Captions</button><button data-view="connection" data-i18n="connection">Connection</button><p class="muted">v0.7.10 PREVIEW<br>25.x / 26.x test</p></nav>
++<div class="layout"><nav><button data-view="timeline">Timeline Engine</button><button data-view="cut" class="selected" data-i18n="autoCut">Auto Cut</button><button data-view="sync">Auto Sync</button><button data-view="sync-after">Smart Sync After Cut</button><button data-view="captions" data-i18n="captions">Captions</button><button data-view="connection" data-i18n="connection">Connection</button><p class="muted">v0.7.11 PREVIEW<br>25.x / 26.x test</p></nav>
+ <main>
+ <section id="timeline" class="view"><div class="eyebrow">00 / NEW TIMELINE ENGINE — PREVIEW</div><h3>Sync first. Cut once.</h3><p class="muted">Read your open Premiere sequence directly. No file picker. Analyze synced video + selected microphone without picking/rendering media. New cut sequence imported separately; original timeline stays intact.</p>
+ <div class="card"><div class="row"><label>Video<select id="tl-video"></select></label><label>Camera audio<select id="tl-camera"></select></label><label>Microphone<select id="tl-mic"></select></label></div><button id="tl-inspect" class="primary">Inspect active Timeline</button><p id="tl-report" class="path">Open a working sequence and choose the tracks. Your current project will not be changed.</p></div>
+--- a/plugin/CSXS/manifest.xml
++++ b/plugin/CSXS/manifest.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="UTF-8"?>
+-<ExtensionManifest Version="7.0" ExtensionBundleId="com.editflow.pro.cep" ExtensionBundleVersion="0.7.10" ExtensionBundleName="EditFlow Pro">
+-  <ExtensionList><Extension Id="com.editflow.pro.cep.panel" Version="0.7.10"/></ExtensionList>
++<ExtensionManifest Version="7.0" ExtensionBundleId="com.editflow.pro.cep" ExtensionBundleVersion="0.7.11" ExtensionBundleName="EditFlow Pro">
++  <ExtensionList><Extension Id="com.editflow.pro.cep.panel" Version="0.7.11"/></ExtensionList>
+   <ExecutionEnvironment>
+     <HostList><Host Name="PPRO" Version="[25.0,99.9]"/></HostList>
+     <LocaleList><Locale Code="All"/></LocaleList>
