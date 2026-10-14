@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - 'staging/*.zip'
+      - 'patches/*.patch'
+      - '.github/workflows/publish-update.yml'
   workflow_dispatch:
 
 permissions:
@@ -55,6 +57,34 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f'version={version}\n')
           print('Selected', path, 'version', version)
+          PY
+          # Build 0.7.8 from the previously verified 0.7.7 staged package and a text patch.
+          # The archive remains binary, but this avoids manually uploading it again.
+          if [ -f patches/0.7.8.patch ]; then
+            mkdir -p build-078
+            python3 - <<'PY'
+          import zipfile
+          with zipfile.ZipFile('staging/EditFlow-Pro-Update.zip') as z:
+              z.extractall('build-078')
+          PY
+            (cd build-078 && patch --batch --forward -p1 < ../patches/0.7.8.patch)
+            python3 - <<'PY'
+          import os, zipfile
+          with zipfile.ZipFile('EditFlow-Pro-Update.zip','w',compression=zipfile.ZIP_DEFLATED) as z:
+              for parent, dirs, files in os.walk('build-078'):
+                  for name in sorted(files):
+                      path = os.path.join(parent,name)
+                      z.write(path,os.path.relpath(path,'build-078').replace(os.sep,'/'))
+          PY
+            echo "version=0.7.8" >> "$GITHUB_OUTPUT"
+          fi
+          python3 - <<'PY'
+          import os, zipfile
+          with zipfile.ZipFile('EditFlow-Pro-Update.zip') as z:
+              manifest=z.read('plugin/CSXS/manifest.xml').decode('utf-8')
+              required={'plugin/CSXS/manifest.xml','plugin/main.js','plugin/index.html','backend/server.py'}
+              assert required.issubset(z.namelist())
+              assert 'ExtensionBundleVersion="' + os.environ.get('RELEASE_VERSION','0.7.8') + '"' in manifest
           PY
           sha256sum EditFlow-Pro-Update.zip > EditFlow-Pro-Update.zip.sha256
       - name: Publish GitHub Release
