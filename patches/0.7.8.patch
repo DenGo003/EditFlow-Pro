@@ -1,0 +1,165 @@
+--- a/backend/server.py
++++ b/backend/server.py
+@@ -124,7 +124,7 @@
+             if not self.authorized(): return
+             try:
+                 if self.path=='/health':
+-                    self.reply(200,{'version':'0.7.7-timeline-cut-caption-match','model_ready':(service.root/'models/small/model.bin').is_file(),
++                    self.reply(200,{'version':'0.7.8-nested-audio-flatten','model_ready':(service.root/'models/small/model.bin').is_file(),
+                                     'ffmpeg':bool(shutil.which(service.ffmpeg)),'ffprobe':bool(shutil.which(service.ffprobe)),
+                                     'output_root':str(service.work_root/'outputs')})
+                 elif self.path.startswith('/jobs/'): self.reply(200,service.status(self.path.split('/')[-1]))
+--- a/backend/timeline_caption.py
++++ b/backend/timeline_caption.py
+@@ -7,7 +7,7 @@
+     if not isinstance(snapshot,dict) or not isinstance(snapshot.get('clips'),list):
+         raise ValueError('Invalid Premiere caption snapshot')
+     clips=snapshot['clips']
+-    if not 1<=len(clips)<=150:raise ValueError('Choose a nonempty audio track with at most 150 clips')
++    if not 1<=len(clips)<=500:raise ValueError('Choose a nonempty audio track with at most 500 clips')
+     duration=core.number(snapshot.get('duration'),0.1,4*3600,'Sequence duration')
+     items=[]
+     for i,c in enumerate(clips):
+--- a/plugin/CSXS/manifest.xml
++++ b/plugin/CSXS/manifest.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="UTF-8"?>
+-<ExtensionManifest Version="7.0" ExtensionBundleId="com.editflow.pro.cep" ExtensionBundleVersion="0.7.7" ExtensionBundleName="EditFlow Pro">
+-  <ExtensionList><Extension Id="com.editflow.pro.cep.panel" Version="0.7.7"/></ExtensionList>
++<ExtensionManifest Version="7.0" ExtensionBundleId="com.editflow.pro.cep" ExtensionBundleVersion="0.7.8" ExtensionBundleName="EditFlow Pro">
++  <ExtensionList><Extension Id="com.editflow.pro.cep.panel" Version="0.7.8"/></ExtensionList>
+   <ExecutionEnvironment>
+     <HostList><Host Name="PPRO" Version="[25.0,99.9]"/></HostList>
+     <LocaleList><Locale Code="All"/></LocaleList>
+--- a/plugin/host/import.jsx
++++ b/plugin/host/import.jsx
+@@ -148,17 +148,49 @@
+   var seq=app.project.activeSequence;
+   if(!seq)return 'ERROR: Open the sequence you want to caption first.';
+   if(audioIndex<0||audioIndex>=seq.audioTracks.numTracks)return 'ERROR: Audio track does not exist.';
+-  var track=seq.audioTracks[audioIndex], clips=[];
++  var track=seq.audioTracks[audioIndex];
+   if(track.clips.numItems===0)return 'ERROR: Selected track is empty.';
+-  if(track.clips.numItems>3000)return 'ERROR: Too many audio clips (max 3000).';
+-  for(var i=0;i<track.clips.numItems;i++) {
+-   var c=track.clips[i],media=c.projectItem,source='';
+-   if(media)try {source=media.getMediaPath()||'';}catch(ignore){}
+-   if(!source)source='';
+-   if(c.disabled)continue;
+-   clips.push({path:source,start:Number(c.start.seconds),end:Number(c.end.seconds),source_in:Number(c.inPoint.seconds),source_out:Number(c.outPoint.seconds),name:String(c.name||'')});
++  var sequences=app.project.sequences, index={};
++  for(var j=0;j<sequences.numSequences;j++){
++   var nestedSeq=sequences[j];
++   if(nestedSeq.projectItem)index[String(nestedSeq.projectItem.nodeId)]=nestedSeq;
+   }
+-  if(!clips.length)return 'ERROR: All clips on selected track are disabled.';
+-  return JSON.stringify({sequence:String(seq.name),audioTrack:audioIndex+1,duration:Number(seq.end.seconds),clips:clips,clipCount:track.clips.numItems});
++  var clips=[], LIMIT=500, EPS=0.000001;
++  function visit(item, parentStart, visibleFrom, visibleTo, depth, ancestors) {
++   if(depth>12)throw Error('Nested audio depth exceeds 12 levels.');
++   if(item.disabled)return;
++   var start=Number(item.start.seconds), end=Number(item.end.seconds);
++   var sourceIn=Number(item.inPoint.seconds), sourceOut=Number(item.outPoint.seconds);
++   if(!isFinite(start)||!isFinite(end)||!isFinite(sourceIn)||!isFinite(sourceOut)||end<=start)return;
++   // parentStart is the global timeline time at source time 0 of the containing sequence.
++   var globalStart=parentStart+start;
++   var from=Math.max(globalStart,visibleFrom), to=Math.min(parentStart+end,visibleTo);
++   if(to-from<=EPS)return;
++   var media=item.projectItem, path='';
++   if(media)try{path=media.getMediaPath()||'';}catch(ignore){}
++   if(path) {
++    var trimFrom=from-globalStart, trimTo=to-globalStart;
++    clips.push({path:path,start:from,end:to,source_in:sourceIn+trimFrom,source_out:sourceIn+trimTo,name:String(item.name||'')});
++    if(clips.length>LIMIT)throw Error('More than '+LIMIT+' audio segments; simplify the track first.');
++    return;
++   }
++   var id=media?String(media.nodeId):'', child=index[id];
++   if(!child)throw Error('Nested audio item '+String(item.name||'')+' does not resolve to an accessible Premiere sequence.');
++   if(ancestors[id])throw Error('Recursive nested sequence detected.');
++   if(Math.abs((end-start)-(sourceOut-sourceIn))>0.08)throw Error('Retimed nested audio is not supported.');
++   var next={};for(var key in ancestors)if(ancestors.hasOwnProperty(key))next[key]=true;next[id]=true;
++   // Nested source t=sourceIn is presented at parent time globalStart.
++   var childOrigin=globalStart-sourceIn;
++   for(var t=0;t<child.audioTracks.numTracks;t++){
++    var audio=child.audioTracks[t];
++    if(audio.isMuted && audio.isMuted())continue;
++    for(var k=0;k<audio.clips.numItems;k++)visit(audio.clips[k],childOrigin,from,to,depth+1,next);
++   }
++  }
++  if(track.isMuted && track.isMuted())return 'ERROR: Selected audio track is muted.';
++  for(var i=0;i<track.clips.numItems;i++)visit(track.clips[i],0,0,Number(seq.end.seconds),0,{});
++  clips.sort(function(a,b){return a.start-b.start;});
++  if(!clips.length)return 'ERROR: No readable source audio in selected track.';
++  return JSON.stringify({sequence:String(seq.name),audioTrack:audioIndex+1,duration:Number(seq.end.seconds),clips:clips,clipCount:clips.length});
+  }catch(e){return 'ERROR: '+e.toString();}
+ }
+--- a/plugin/main.js
++++ b/plugin/main.js
+@@ -266,55 +266,9 @@
+   if(a<0)throw Error('Choose the caption audio track first.');
+   out.textContent='Reading active Premiere sequence audio track A'+(a+1)+'…';
+   const snapshot=JSON.parse(await hostEval('editflowCaptionSnapshot('+a+')'));
+-  const nested=snapshot.clips.some(c=>!c.path);
+-  let payload;
+-  if(nested){
+-   // Only a verified, unmodified EditFlow-generated AutoCut sequence can reuse its saved plan.
+-   const n=nodeBridge();if(!n)throw Error('Nested captions need CEP Node.js access to the saved AutoCut plan.');
+-   const root=JSON.parse(n.fs.readFileSync(n.path.join(process.env.LOCALAPPDATA,'EditFlowPro','cep-launcher.json'),'utf8'));
+-   const outputs=n.path.join(root.workRoot||n.path.dirname(root.backendRoot),'outputs');
+-   if(!n.fs.existsSync(outputs))throw Error('Saved AutoCut plans not found in '+outputs);
+-   let matches=[];
+-   for(const name of n.fs.readdirSync(outputs)){
+-    const f=n.path.join(outputs,name,'timeline-cut-plan.json');if(!n.fs.existsSync(f))continue;
+-    try{
+-     const plan=JSON.parse(n.fs.readFileSync(f,'utf8'));
+-     const fps=Number(String(plan.fps).includes('/')?String(plan.fps).split('/')[0]/String(plan.fps).split('/')[1]:plan.fps);
+-     const d=plan.keep.reduce((v,r)=>v+r[1]-r[0],0)/fps;
+-     // Generated XML uses this sequence name, regardless of the *source* sequence name.
+-     const expectedName='EditFlow - Timeline AutoCut A2';
+-     const correctName=snapshot.sequence===expectedName;
+-     const expectedTrack=Number(plan.snapshot.micTrack||2);
+-     const correctTrack=expectedTrack===a+1;
+-     const clips=snapshot.clips;
+-     const tolerance=Math.max(.08,1.5/fps);
+-     const correctDuration=Math.abs(snapshot.duration-d)<=tolerance;
+-     // Validate each cut boundary for multi-clip XML sequences. This also supports >150 cuts.
+-     let boundariesOK=clips.length===plan.keep.length;
+-     if(boundariesOK){
+-      let cursor=0;
+-      for(let i=0;i<plan.keep.length;i++){
+-       const expectedLength=(plan.keep[i][1]-plan.keep[i][0])/fps;
+-       const c=clips[i];
+-       if(Math.abs(c.start-cursor)>tolerance || Math.abs(c.end-(cursor+expectedLength))>tolerance){boundariesOK=false;break;}
+-       cursor+=expectedLength;
+-      }
+-     }
+-     // Some versions import the whole cut audio as a single nested clip. Require
+-     // one full-length *nested* clip with both timeline boundaries at the expected points.
+-     const oneFullNest=clips.length===1 && !clips[0].path &&
+-       Math.abs(clips[0].start)<=tolerance && Math.abs(clips[0].end-d)<=tolerance &&
+-       Math.abs((clips[0].source_out-clips[0].source_in)-d)<=tolerance;
+-     if(correctName && correctTrack && correctDuration && (boundariesOK || oneFullNest))matches.push(f);
+-    }catch(ignore){}
+-   }
+-   if(matches.length!==1)throw Error('Nested track: '+matches.length+' matching saved AutoCut plans. Confirm selected audio track and the generated sequence name, then try again. No transcription started.');
+-   out.textContent='Found matching saved AutoCut plan for audio A'+(a+1)+'. Building captions without video render…';
+-   payload={kind:'timeline_caption',plan:matches[0],language:$('tl-caption-language').value,word_mode:$('tl-caption-words').checked};
+-  }else{
+-   out.textContent='Transcribing '+snapshot.sequence+' from track A'+(a+1)+'…';
+-   payload={kind:'sequence_caption',snapshot,language:$('tl-caption-language').value,word_mode:$('tl-caption-words').checked};
+-  }
++  if(snapshot.clips.some(c=>!c.path))throw Error('Nested audio could not be resolved to a source file. Nothing was transcribed.');
++  out.textContent='Building audio from '+snapshot.clips.length+' timeline clips on A'+(a+1)+' (no video export)…';
++  const payload={kind:'sequence_caption',snapshot,language:$('tl-caption-language').value,word_mode:$('tl-caption-words').checked};
+   const task=await job(payload);
+   const result=task.result;
+   out.textContent='SRT ready: '+result.srt+'\nImporting SRT into the Premiere Project panel…';
+@@ -333,7 +287,7 @@
+   if(limit>4)return reject(Error('Too many redirects'));
+   if(!/^https:\/\/(github\.com|api\.github\.com|objects\.githubusercontent\.com|release-assets\.githubusercontent\.com)\//i.test(url))return reject(Error('Unexpected download host'));
+   const n=nodeBridge();if(!n)return reject(Error('CEP Node.js is required for installation'));
+-  const req=require('https').get(url,{headers:{'User-Agent':'EditFlowPro-Updater/0.7.7','Accept':'application/octet-stream'}},res=>{
++  const req=require('https').get(url,{headers:{'User-Agent':'EditFlowPro-Updater/0.7.8','Accept':'application/octet-stream'}},res=>{
+    if([301,302,303,307,308].includes(res.statusCode)){const next=new URL(res.headers.location,url).toString();res.resume();getNodeBody(next,limit+1).then(resolve,reject);return;}
+    if(res.statusCode!==200){res.resume();reject(Error('HTTP '+res.statusCode));return;}
+    const parts=[];let size=0;res.on('data',b=>{size+=b.length;if(size>40*1024*1024){req.destroy(Error('Package too large'));return;}parts.push(b);});res.on('end',()=>resolve(Buffer.concat(parts)));res.on('error',reject);
