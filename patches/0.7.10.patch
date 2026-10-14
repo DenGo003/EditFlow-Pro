@@ -1,0 +1,47 @@
+--- a/plugin/host/import.jsx
++++ b/plugin/host/import.jsx
+@@ -154,7 +154,7 @@
+-  var clips=[], LIMIT=500, EPS=0.000001;
++  var clips=[], LIMIT=500, EPS=0.000001;
+   function visit(item, parentStart, visibleFrom, visibleTo, depth, ancestors) {
+@@ -166,6 +166,7 @@
+    var globalStart=parentStart+start;
+    var from=Math.max(globalStart,visibleFrom), to=Math.min(parentStart+end,visibleTo);
++   if(!isFinite(from)||!isFinite(to))throw Error('Invalid audio clip timing from Premiere.');
+    if(to-from<=EPS)return;
+@@ -190,7 +191,15 @@
+   }
+   if(track.isMuted && track.isMuted())return 'ERROR: Selected audio track is muted.';
+-  for(var i=0;i<track.clips.numItems;i++)visit(track.clips[i],0,0,Number(seq.end.seconds),0,{});
++  // Some Premiere versions return an unavailable seq.end.seconds.  Passing NaN to
++  // Math.min() corrupts every expanded clip end (serialized as JSON null).
++  // Determine the rendering window from the selected audio track instead.
++  var audioEnd=0;
++  for(var i=0;i<track.clips.numItems;i++){
++   var edge=Number(track.clips[i].end.seconds);
++   if(!isFinite(edge)||edge<0)throw Error('Premiere returned an invalid audio clip end time at index '+i+'.');
++   if(edge>audioEnd)audioEnd=edge;
++  }
++  if(!(audioEnd>0))throw Error('No positive audio duration found on selected track.');
++  for(var i=0;i<track.clips.numItems;i++)visit(track.clips[i],0,0,audioEnd,0,{});
+   clips.sort(function(a,b){return a.start-b.start;});
+   if(!clips.length)return 'ERROR: No readable source audio in selected track.';
+-  return JSON.stringify({sequence:String(seq.name),audioTrack:audioIndex+1,duration:Number(seq.end.seconds),clips:clips,clipCount:clips.length});
++  return JSON.stringify({sequence:String(seq.name),audioTrack:audioIndex+1,duration:audioEnd,clips:clips,clipCount:clips.length});
+--- a/plugin/CSXS/manifest.xml
++++ b/plugin/CSXS/manifest.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="UTF-8"?>
+-<ExtensionManifest Version="7.0" ExtensionBundleId="com.editflow.pro.cep" ExtensionBundleVersion="0.7.9" ExtensionBundleName="EditFlow Pro">
+-  <ExtensionList><Extension Id="com.editflow.pro.cep.panel" Version="0.7.9"/></ExtensionList>
++<ExtensionManifest Version="7.0" ExtensionBundleId="com.editflow.pro.cep" ExtensionBundleVersion="0.7.10" ExtensionBundleName="EditFlow Pro">
++  <ExtensionList><Extension Id="com.editflow.pro.cep.panel" Version="0.7.10"/></ExtensionList>
+   <ExecutionEnvironment>
+--- a/plugin/index.html
++++ b/plugin/index.html
+@@ -1,6 +1,6 @@
+ <!DOCTYPE html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="styles.css"></head><body>
+ <header><span class="brand">E</span><div><h2>EditFlow <span class="accent">Pro</span></h2><p class="muted">TIMELINE ENGINE / SAFE PREVIEW</p></div></header>
+-<div class="layout"><nav><button data-view="timeline">Timeline Engine</button><button data-view="cut" class="selected" data-i18n="autoCut">Auto Cut</button><button data-view="sync">Auto Sync</button><button data-view="sync-after">Smart Sync After Cut</button><button data-view="captions" data-i18n="captions">Captions</button><button data-view="connection" data-i18n="connection">Connection</button><p class="muted">v0.7.9 PREVIEW<br>25.x / 26.x test</p></nav>
++<div class="layout"><nav><button data-view="timeline">Timeline Engine</button><button data-view="cut" class="selected" data-i18n="autoCut">Auto Cut</button><button data-view="sync">Auto Sync</button><button data-view="sync-after">Smart Sync After Cut</button><button data-view="captions" data-i18n="captions">Captions</button><button data-view="connection" data-i18n="connection">Connection</button><p class="muted">v0.7.10 PREVIEW<br>25.x / 26.x test</p></nav>
+ <main>
