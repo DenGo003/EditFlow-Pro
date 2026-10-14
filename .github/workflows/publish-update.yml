@@ -98,6 +98,18 @@ jobs:
           PY
             echo "version=0.7.9" >> "$GITHUB_OUTPUT"
           fi
+          if [ -f patches/0.7.10.patch ]; then
+            (cd build-078 && patch --batch --forward -p1 < ../patches/0.7.10.patch)
+            python3 - <<'PY'
+          import os, zipfile
+          with zipfile.ZipFile('EditFlow-Pro-Update.zip','w',compression=zipfile.ZIP_DEFLATED) as z:
+              for parent, dirs, files in os.walk('build-078'):
+                  for name in sorted(files):
+                      path = os.path.join(parent,name)
+                      z.write(path,os.path.relpath(path,'build-078').replace(os.sep,'/'))
+          PY
+            echo "version=0.7.10" >> "$GITHUB_OUTPUT"
+          fi
           sha256sum EditFlow-Pro-Update.zip > EditFlow-Pro-Update.zip.sha256
       - name: Publish GitHub Release
         env:
