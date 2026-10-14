@@ -1,0 +1,74 @@
+--- a/backend/timeline_caption.py
++++ b/backend/timeline_caption.py
+@@ -8,7 +8,15 @@
+         raise ValueError('Invalid Premiere caption snapshot')
+     clips=snapshot['clips']
+     if not 1<=len(clips)<=500:raise ValueError('Choose a nonempty audio track with at most 500 clips')
+-    duration=core.number(snapshot.get('duration'),0.1,4*3600,'Sequence duration')
++    # Premiere may report an unavailable sequence end as JSON null. In that case
++    # derive the audio render end from the selected track, not a hard-coded sequence name.
++    raw_duration=snapshot.get('duration')
++    if raw_duration is None:
++        valid_ends=[float(c['end']) for c in clips if c.get('end') is not None]
++        if len(valid_ends)!=len(clips):
++            raise ValueError('Premiere returned missing audio clip end time. Reopen the sequence and try again.')
++        raw_duration=max(valid_ends)
++    duration=core.number(raw_duration,0.1,4*3600,'Sequence duration')
+     items=[]
+     for i,c in enumerate(clips):
+         path=core.media_path(c['path'])
+--- a/backend/core.py
++++ b/backend/core.py
+@@ -35,12 +35,18 @@
+     a = next((s for s in d['streams'] if s['codec_type']=='audio'), None)
+     v = next((s for s in d['streams'] if s['codec_type']=='video' and not s.get('disposition',{}).get('attached_pic')), None)
+     if not a: raise ValueError(f'{path.name}: no audio stream')
+-    duration = float(d['format'].get('duration', a.get('duration', 0)))
++    raw_duration = d.get('format', {}).get('duration') or a.get('duration')
++    if raw_duration in (None, 'N/A', ''):
++        raise ValueError(f'{path.name}: FFprobe could not determine audio duration')
++    duration = float(raw_duration)
+     if not math.isfinite(duration) or duration <= 0: raise ValueError('Invalid media duration')
+     return {'path':str(path), 'duration':duration, 'audio':a, 'video':v}
+ 
+ def number(value, low, high, label):
+-    n=float(value)
++    if value is None:
++        raise ValueError(f'{label} is missing from Premiere timeline data')
++    try: n=float(value)
++    except (TypeError, ValueError): raise ValueError(f'{label} is not a valid number: {value!r}')
+     if not math.isfinite(n) or not low <= n <= high: raise ValueError(f'{label} must be {low} to {high}')
+     return n
+ 
+--- a/backend/server.py
++++ b/backend/server.py
+@@ -124,7 +124,7 @@
+             if not self.authorized(): return
+             try:
+                 if self.path=='/health':
+-                    self.reply(200,{'version':'0.7.8-nested-audio-flatten','model_ready':(service.root/'models/small/model.bin').is_file(),
++                    self.reply(200,{'version':'0.7.9-null-duration-fix','model_ready':(service.root/'models/small/model.bin').is_file(),
+                                     'ffmpeg':bool(shutil.which(service.ffmpeg)),'ffprobe':bool(shutil.which(service.ffprobe)),
+                                     'output_root':str(service.work_root/'outputs')})
+                 elif self.path.startswith('/jobs/'): self.reply(200,service.status(self.path.split('/')[-1]))
+--- a/plugin/CSXS/manifest.xml
++++ b/plugin/CSXS/manifest.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="UTF-8"?>
+-<ExtensionManifest Version="7.0" ExtensionBundleId="com.editflow.pro.cep" ExtensionBundleVersion="0.7.8" ExtensionBundleName="EditFlow Pro">
+-  <ExtensionList><Extension Id="com.editflow.pro.cep.panel" Version="0.7.8"/></ExtensionList>
++<ExtensionManifest Version="7.0" ExtensionBundleId="com.editflow.pro.cep" ExtensionBundleVersion="0.7.9" ExtensionBundleName="EditFlow Pro">
++  <ExtensionList><Extension Id="com.editflow.pro.cep.panel" Version="0.7.9"/></ExtensionList>
+   <ExecutionEnvironment>
+     <HostList><Host Name="PPRO" Version="[25.0,99.9]"/></HostList>
+     <LocaleList><Locale Code="All"/></LocaleList>
+--- a/plugin/index.html
++++ b/plugin/index.html
+@@ -1,6 +1,6 @@
+ <!DOCTYPE html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="styles.css"></head><body>
+ <header><span class="brand">E</span><div><h2>EditFlow <span class="accent">Pro</span></h2><p class="muted">TIMELINE ENGINE / SAFE PREVIEW</p></div></header>
+-<div class="layout"><nav><button data-view="timeline">Timeline Engine</button><button data-view="cut" class="selected" data-i18n="autoCut">Auto Cut</button><button data-view="sync">Auto Sync</button><button data-view="sync-after">Smart Sync After Cut</button><button data-view="captions" data-i18n="captions">Captions</button><button data-view="connection" data-i18n="connection">Connection</button><p class="muted">v0.7.7 PREVIEW<br>25.x / 26.x test</p></nav>
++<div class="layout"><nav><button data-view="timeline">Timeline Engine</button><button data-view="cut" class="selected" data-i18n="autoCut">Auto Cut</button><button data-view="sync">Auto Sync</button><button data-view="sync-after">Smart Sync After Cut</button><button data-view="captions" data-i18n="captions">Captions</button><button data-view="connection" data-i18n="connection">Connection</button><p class="muted">v0.7.9 PREVIEW<br>25.x / 26.x test</p></nav>
+ <main>
+ <section id="timeline" class="view"><div class="eyebrow">00 / NEW TIMELINE ENGINE — PREVIEW</div><h3>Sync first. Cut once.</h3><p class="muted">Read your open Premiere sequence directly. No file picker. Analyze synced video + selected microphone without picking/rendering media. New cut sequence imported separately; original timeline stays intact.</p>
+ <div class="card"><div class="row"><label>Video<select id="tl-video"></select></label><label>Camera audio<select id="tl-camera"></select></label><label>Microphone<select id="tl-mic"></select></label></div><button id="tl-inspect" class="primary">Inspect active Timeline</button><p id="tl-report" class="path">Open a working sequence and choose the tracks. Your current project will not be changed.</p></div>
