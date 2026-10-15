@@ -1,11 +1,8 @@
 name: Publish EditFlow Pro Update
-
 on:
   push:
     paths:
       - 'staging/*.zip'
-      - 'patches/*.patch'
-      - '.github/workflows/publish-update.yml'
   workflow_dispatch:
 
 permissions:
@@ -22,122 +19,54 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Validate and prepare latest staged update
+      - name: Validate newest staged package
         id: prepare
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import glob, os, re, zipfile
+          import glob, os, re, shutil, zipfile
           candidates = []
-          for name in glob.glob('staging/*.zip'):
-              with zipfile.ZipFile(name) as z:
-                  names = z.namelist()
-                  if len(names) > 100 or sum(i.file_size for i in z.infolist()) > 50_000_000:
-                      raise SystemExit(f"Unexpected package size: {name}")
-                  required = {'plugin/CSXS/manifest.xml', 'plugin/main.js', 'plugin/index.html', 'backend/server.py'}
-                  if not required.issubset(names):
-                      raise SystemExit(f"Missing required files: {name}")
-                  if any(n.startswith('/') or '..' in n.split('/') or '\\' in n for n in names):
-                      raise SystemExit(f"Unsafe archive path: {name}")
-                  forbidden = ('.env', 'cep-launcher.json', 'pairing', 'token', 'secret', '.prproj', '.wav', '.mp4', '.pkl')
-                  if any(any(x in n.lower() for x in forbidden) for n in names):
-                      raise SystemExit(f"Potentially sensitive file: {name}")
-                  manifest = z.read('plugin/CSXS/manifest.xml').decode('utf-8')
-                  found = re.search(r'ExtensionBundleVersion="([0-9]+\.[0-9]+\.[0-9]+)"', manifest)
-                  if not found:
-                      raise SystemExit(f"Missing version in {name}")
-                  version = found.group(1)
-                  candidates.append((tuple(map(int, version.split('.'))), version, name))
-          if not candidates:
-              raise SystemExit('No staged ZIP packages')
-          _, version, path = max(candidates)
-          import shutil
-          shutil.copyfile(path, 'EditFlow-Pro-Update.zip')
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f'version={version}\n')
-          print('Selected', path, 'version', version)
+          for path in glob.glob('staging/*.zip'):
+              with zipfile.ZipFile(path) as z:
+                  infos = z.infolist()
+                  names = [i.filename for i in infos]
+                  if len(infos)>100 or sum(i.file_size for i in infos)>50_000_000:
+                      raise SystemExit(f'Invalid ZIP size: {path}')
+                  if len(names)!=len(set(names)) or any(n.startswith('/') or '..' in n.split('/') or '\\' in n for n in names):
+                      raise SystemExit(f'Unsafe ZIP entries: {path}')
+                  required={'plugin/CSXS/manifest.xml','plugin/main.js','plugin/index.html','backend/server.py'}
+                  if not required.issubset(names): raise SystemExit(f'Missing required files: {path}')
+                  forbidden=('.env','cep-launcher.json','pairing','token','secret','.prproj','.wav','.mp4','.pkl')
+                  if any(any(s in n.lower() for s in forbidden) for n in names):
+                      raise SystemExit(f'Potentially sensitive content: {path}')
+                  manifest=z.read('plugin/CSXS/manifest.xml').decode('utf-8')
+                  match=re.search(r'ExtensionBundleVersion="([0-9]+\.[0-9]+\.[0-9]+)"', manifest)
+                  if not match: raise SystemExit(f'Invalid version: {path}')
+                  version=match.group(1)
+                  candidates.append((tuple(map(int,version.split('.'))),version,path))
+          if not candidates: raise SystemExit('No staged release packages')
+          _, version, source=max(candidates)
+          shutil.copyfile(source,'EditFlow-Pro-Update.zip')
+          print('Publishing',version,'from',source)
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out: out.write('version='+version+'\n')
           PY
-          # Build 0.7.8 from the previously verified 0.7.7 staged package and a text patch.
-          # The archive remains binary, but this avoids manually uploading it again.
-          if [ -f patches/0.7.8.patch ]; then
-            mkdir -p build-078
-            python3 - <<'PY'
-          import zipfile
-          with zipfile.ZipFile('staging/EditFlow-Pro-Update.zip') as z:
-              z.extractall('build-078')
-          PY
-            (cd build-078 && patch --batch --forward -p1 < ../patches/0.7.8.patch)
-            python3 - <<'PY'
-          import os, zipfile
-          with zipfile.ZipFile('EditFlow-Pro-Update.zip','w',compression=zipfile.ZIP_DEFLATED) as z:
-              for parent, dirs, files in os.walk('build-078'):
-                  for name in sorted(files):
-                      path = os.path.join(parent,name)
-                      z.write(path,os.path.relpath(path,'build-078').replace(os.sep,'/'))
-          PY
-            echo "version=0.7.8" >> "$GITHUB_OUTPUT"
-          fi
-          python3 - <<'PY'
-          import os, zipfile
-          with zipfile.ZipFile('EditFlow-Pro-Update.zip') as z:
-              manifest=z.read('plugin/CSXS/manifest.xml').decode('utf-8')
-              required={'plugin/CSXS/manifest.xml','plugin/main.js','plugin/index.html','backend/server.py'}
-              assert required.issubset(z.namelist())
-              assert 'ExtensionBundleVersion="' + os.environ.get('RELEASE_VERSION','0.7.8') + '"' in manifest
-          PY
-          if [ -f patches/0.7.9.patch ]; then
-            (cd build-078 && patch --batch --forward -p1 < ../patches/0.7.9.patch)
-            python3 - <<'PY'
-          import os, zipfile
-          with zipfile.ZipFile('EditFlow-Pro-Update.zip','w',compression=zipfile.ZIP_DEFLATED) as z:
-              for parent, dirs, files in os.walk('build-078'):
-                  for name in sorted(files):
-                      path = os.path.join(parent,name)
-                      z.write(path,os.path.relpath(path,'build-078').replace(os.sep,'/'))
-          PY
-            echo "version=0.7.9" >> "$GITHUB_OUTPUT"
-          fi
-          if [ -f patches/0.7.10.patch ]; then
-            (cd build-078 && patch --batch --forward -p1 < ../patches/0.7.10.patch)
-            python3 - <<'PY'
-          import os, zipfile
-          with zipfile.ZipFile('EditFlow-Pro-Update.zip','w',compression=zipfile.ZIP_DEFLATED) as z:
-              for parent, dirs, files in os.walk('build-078'):
-                  for name in sorted(files):
-                      path = os.path.join(parent,name)
-                      z.write(path,os.path.relpath(path,'build-078').replace(os.sep,'/'))
-          PY
-            echo "version=0.7.10" >> "$GITHUB_OUTPUT"
-          fi
-          if [ -f patches/0.7.11.patch ]; then
-            (cd build-078 && patch --batch --forward -p1 < ../patches/0.7.11.patch)
-            python3 - <<'PY'
-          import os, zipfile
-          with zipfile.ZipFile('EditFlow-Pro-Update.zip','w',compression=zipfile.ZIP_DEFLATED) as z:
-              for parent, dirs, files in os.walk('build-078'):
-                  for name in sorted(files):
-                      path = os.path.join(parent,name)
-                      z.write(path,os.path.relpath(path,'build-078').replace(os.sep,'/'))
-          PY
-            echo "version=0.7.11" >> "$GITHUB_OUTPUT"
-          fi
           sha256sum EditFlow-Pro-Update.zip > EditFlow-Pro-Update.zip.sha256
-      - name: Publish GitHub Release
+      - name: Publish GitHub release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ steps.prepare.outputs.version }}
-        shell: bash
         run: |
           set -euo pipefail
           TAG="v${RELEASE_VERSION}"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release already exists, skipping: $TAG"
+            echo "Release already exists: $TAG"
             exit 0
           fi
           gh release create "$TAG" \
             EditFlow-Pro-Update.zip \
             EditFlow-Pro-Update.zip.sha256 \
             --title "EditFlow Pro $TAG" \
-            --notes "EditFlow Pro update. Back up projects and restart Premiere when prompted." \
+            --notes "Experimental release. Back up Premiere project and test on a duplicate sequence." \
             --latest
