@@ -1,0 +1,9 @@
+{
+  "tag": "v0.8.2",
+  "asset": "https://github.com/DenGo003/EditFlow-Pro/releases/download/v0.8.2/EditFlow-Pro-Update.zip",
+  "sha256": "d705384f29030ee0b1d2ad08efd1ef4528d72fa7624d7d638a9c94fb3a0567e6",
+  "checksum_matches_published_asset": true,
+  "restored_backend": "byte-identical",
+  "legacy_cep": "byte-identical, relocated from plugin/",
+  "note": "Incremental update archive: not a complete fresh Windows installation. requirements-win-py311.lock and launchers absent. Existing 0.8.2 runtime required."
+}

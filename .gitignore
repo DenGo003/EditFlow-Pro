@@ -28,3 +28,6 @@ models/
 *.rar
 .DS_Store
 Thumbs.db
+
+!legacy/cep/CSXS/manifest.xml
+artifacts/
