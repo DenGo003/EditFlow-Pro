@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><link rel="stylesheet" href="styles.css"></head><body>
-<header><h2>EditFlow Pro</h2><p>UXP · Milestone 1 · Development preview</p></header>
+<header><h2>EditFlow Pro</h2><p>UXP · Milestone 1.1 · Development preview</p></header>
 <main>
-<section><h3>Connection</h3><p>Start your existing 0.8.2 backend. Address: 127.0.0.1:8765</p><label>Pairing token</label><input id="token" type="password" placeholder="Paste token from backend window"><button id="connect">Connect / Check health</button><pre id="health">Not connected</pre></section>
+<section><h3>Connection</h3><button id="autoConnect">Start &amp; Connect</button><button id="resetPairing">Change pairing folder</button><p>First use only: select %LOCALAPPDATA%\EditFlowPro in the folder picker. Then use Start &amp; Connect without copying a token.</p><p>Start your existing 0.8.2 backend. Address: 127.0.0.1:8765</p><label>Pairing token</label><input id="token" type="password" placeholder="Paste token from backend window"><button id="connect">Connect / Check health</button><pre id="health">Not connected</pre></section>
 <section><h3>Timeline diagnostics</h3><p>Read active sequence and video tracks.</p><button id="inspect">Inspect timeline</button><pre id="timeline">Not inspected</pre></section>
 <section><h3>Source analysis</h3><p>Analyze an original local file. Results only; timeline editing is a later milestone.</p><label>Full local media path</label><input id="media" placeholder="G:\Media\video.mp4"><button id="analyze">Analyze silence</button><button id="transcribe">Arabic transcription → SRT</button></section>
 <section><h3>Auto Sync preview</h3><label>Camera file path</label><input id="camera"><label>Microphone file path</label><input id="mic"><p>Compares both original sources from 00:00. Review the offset before any manual edit.</p><button id="sync">Calculate sync offset</button></section>

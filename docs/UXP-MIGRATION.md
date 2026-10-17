@@ -75,3 +75,19 @@ Tests: `npm test` and `python -m unittest tests.test_baseline -v` (Python needs 
 6. Resize/scroll panel, verify progress footer stays visible. Verify CEP still opens and works. Record Premiere/UDT versions, screenshots and exact failures.
 
 Host results: NOT RUN. Nested edits, Lumetri, adjustment layer behavior, GPU inference, installer, rollback and real Whisper transcription: NOT VERIFIED. Unit tests with fake Premiere objects are adapter tests, not host integration tests.
+
+## Milestone 1.1: Start & Connect
+
+The original user screenshot confirms the M1 UXP panel loaded in Premiere 25.6.2. Backend authentication and timeline read results from that host are still pending.
+
+Version 1.0.1 adds Start & Connect. Once only, select the existing `%LOCALAPPDATA%\EditFlowPro` folder via Adobe's folder picker (paste that path into the picker address bar). It must contain the existing `cep-launcher.json`. The panel stores a UXP persistent folder-access token, not the backend secret. On each click, it reads `pairing-token.txt` and checks authenticated health. If unavailable, it asks Adobe to open the bundled Windows CMD launcher, then re-reads the token and polls health. Approve Adobe's external-process prompt when shown. No clipboard operations or public token endpoint are used. Change pairing folder forgets the saved access reference.
+
+The launcher reuses backendRoot/backendPython/workRoot from the existing installation config, keeps models and user data in the existing LocalAppData location, and preserves the token. It refuses to start a duplicate backend if TCP 8765 is occupied. An occupied port is not treated as authentication success. Missing config, Python or work drive stops with an error in the launcher window. This requires the existing installed backend; it is not a fresh installer.
+
+Update procedure: replace your development panel folder with this source preview, then UDT Unload and Load (manifest permissions changed; Watch alone is insufficient). Click Start & Connect and select the folder once. Keep the backend window open. Manual pairing remains available.
+
+Additional tests cover existing-backend reuse, token refresh, delayed token creation, denied launch, invalid pairing file and startup without authenticated health. The Windows CMD launcher and actual UXP file/shell permissions are NOT executable in the Linux test environment; their host acceptance remains pending. If Adobe rejects CMD launch, retain manual backend startup while collecting the precise error; do not bypass Adobe permissions.
+
+Official references:
+- https://developer.adobe.com/premiere-pro/uxp/resources/recipes/external-process/
+- https://developer.adobe.com/premiere-pro/uxp/uxp-api/reference-js/modules/uxp/persistent-file-storage/file-system-provider

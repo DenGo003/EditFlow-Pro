@@ -1,12 +1,16 @@
 const {BackendClient}=require('./src/client.js');
 const {inspectTimeline}=require('./src/premiere.js');
+const {AutoConnector}=require('./src/autoconnect.js');
+const uxp=require('uxp');
+const fs=uxp.storage.localFileSystem;
+const PAIRING_FOLDER='editflow.pairingFolder.v1';
 const client=new BackendClient((url,opts)=>fetch(url,opts));
 const $=id=>document.getElementById(id);
 let timer=null, generation=0, activeJob='', busy=false;
 const terminal=s=>['complete','failed','cancelled'].includes(s);
 function status(text) { $('status').textContent=text; }
 function stopWatch() { generation++; clearTimeout(timer); timer=null; }
-function setBusy(value) { busy=value; ['connect','analyze','transcribe','sync','watch'].forEach(id=>$(id).disabled=value); }
+function setBusy(value) { busy=value; ['connect','autoConnect','resetPairing','analyze','transcribe','sync','watch','cancel','inspect'].forEach(id=>$(id).disabled=value); }
 async function action(fn) { if(busy)return; setBusy(true); try { await fn(); } catch(e) { status(e.message); } finally { setBusy(false); } }
 async function watch(id) {
   client.checkId(id); stopWatch(); activeJob=id; $('jobId').value=id; const epoch=generation;
@@ -31,6 +35,47 @@ async function submit(kind,data) {
   $('result').textContent='Awaiting backend result';
   await watch(await client.start(kind,data));
 }
+async function pairingFolder() {
+  const saved=localStorage.getItem(PAIRING_FOLDER);
+  if(saved) {
+    try { return await fs.getEntryForPersistentToken(saved); }
+    catch (_) { localStorage.removeItem(PAIRING_FOLDER); }
+  }
+  status('Select your AppData > Local > EditFlowPro folder.');
+  const folder=await fs.getFolder();
+  if(!folder)throw Error('Folder selection cancelled.');
+  // The launcher uses the current Windows user's existing LocalAppData installation.
+  if(!/[/\\]AppData[/\\]Local[/\\]EditFlowPro[/\\]?$/i.test(folder.nativePath))throw Error('Choose %LOCALAPPDATA%\\EditFlowPro, not the App/source folder.');
+  try { await folder.getEntry('cep-launcher.json'); }
+  catch (_) { throw Error('Existing cep-launcher.json is missing from this folder.'); }
+  localStorage.setItem(PAIRING_FOLDER,await fs.createPersistentToken(folder));
+  return folder;
+}
+$('autoConnect').addEventListener('click',()=>action(async()=>{
+  stopWatch(); activeJob=''; $('health').textContent='Connecting…';
+  const priorTimeout=client.timeout;
+  try {
+    const folder=await pairingFolder();
+    client.timeout=1500;
+    const connector=new AutoConnector({client,
+      readToken:async()=>{const file=await folder.getEntry('pairing-token.txt');return file.read();},
+      launch:async()=>{
+        const plugin=await fs.getPluginFolder();
+        const launcher=await plugin.getEntry('launcher/Start-EditFlow-Backend.cmd');
+        return uxp.shell.openPath(launcher.nativePath,'Start your installed EditFlow backend locally so the panel can connect.');
+      },
+      wait:ms=>new Promise(resolve=>setTimeout(resolve,ms)),report:status
+    });
+    const h=await connector.connect();
+    $('token').value=''; $('health').textContent=JSON.stringify(h,null,2);
+    status('Backend authenticated · '+h.version);
+  } catch(e) { $('health').textContent='Not connected'; throw e; }
+  finally {client.timeout=priorTimeout;}
+}));
+$('resetPairing').addEventListener('click',()=>action(async()=>{
+  stopWatch(); activeJob=''; client.token=''; localStorage.removeItem(PAIRING_FOLDER);
+  $('health').textContent='Not connected'; status('Folder access forgotten. Use Start & Connect to select again.');
+}));
 $('connect').addEventListener('click',()=>action(async()=>{
   stopWatch(); activeJob=''; client.pair($('token').value); $('token').value='';
   $('health').textContent='Checking…';

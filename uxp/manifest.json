@@ -2,7 +2,7 @@
   "manifestVersion": 5,
   "id": "com.editflow.pro.uxp.dev",
   "name": "EditFlow Pro \u2014 UXP Preview",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "index.html",
   "host": {
     "app": "premierepro",
@@ -29,6 +29,12 @@
     "network": {
       "domains": [
         "http://127.0.0.1:8765"
+      ]
+    },
+    "localFileSystem": "request",
+    "launchProcess": {
+      "extensions": [
+        ".cmd"
       ]
     }
   }
