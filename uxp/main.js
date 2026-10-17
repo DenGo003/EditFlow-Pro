@@ -1,0 +1,91 @@
+const {BackendClient}=require('./src/client.js');
+const {inspectTimeline}=require('./src/premiere.js');
+const {AutoConnector}=require('./src/autoconnect.js');
+const uxp=require('uxp');
+const fs=uxp.storage.localFileSystem;
+const PAIRING_FOLDER='editflow.pairingFolder.v1';
+const client=new BackendClient((url,opts)=>fetch(url,opts));
+const $=id=>document.getElementById(id);
+let timer=null, generation=0, activeJob='', busy=false;
+const terminal=s=>['complete','failed','cancelled'].includes(s);
+function status(text) { $('status').textContent=text; }
+function stopWatch() { generation++; clearTimeout(timer); timer=null; }
+function setBusy(value) { busy=value; ['connect','autoConnect','resetPairing','analyze','transcribe','sync','watch','cancel','inspect'].forEach(id=>$(id).disabled=value); }
+async function action(fn) { if(busy)return; setBusy(true); try { await fn(); } catch(e) { status(e.message); } finally { setBusy(false); } }
+async function watch(id) {
+  client.checkId(id); stopWatch(); activeJob=id; $('jobId').value=id; const epoch=generation;
+  async function poll() {
+    try {
+      const j=await client.job(id); if(epoch!==generation)return;
+      status(j.state+' · '+j.message);
+      if(Number.isFinite(j.done)&&Number.isFinite(j.total)&&j.total>0) $('progress').value=Math.max(0,Math.min(100,100*j.done/j.total));
+      else $('progress').removeAttribute('value');
+      if(terminal(j.state)) {
+        $('progress').value=j.state==='complete'?100:0;
+        $('result').textContent=JSON.stringify(j.result||{state:j.state,message:j.message},null,2);
+        activeJob=''; return;
+      }
+      timer=setTimeout(poll,1000);
+    } catch(e) { if(epoch===generation) { status(e.message+' Monitoring stopped; job may still be running.'); $('progress').value=0; } }
+  }
+  await poll();
+}
+async function submit(kind,data) {
+  if(activeJob) { const old=await client.job(activeJob); if(!terminal(old.state))throw Error('Wait for the active job or cancel it.'); }
+  $('result').textContent='Awaiting backend result';
+  await watch(await client.start(kind,data));
+}
+async function pairingFolder() {
+  const saved=localStorage.getItem(PAIRING_FOLDER);
+  if(saved) {
+    try { return await fs.getEntryForPersistentToken(saved); }
+    catch (_) { localStorage.removeItem(PAIRING_FOLDER); }
+  }
+  status('Select your AppData > Local > EditFlowPro folder.');
+  const folder=await fs.getFolder();
+  if(!folder)throw Error('Folder selection cancelled.');
+  // The launcher uses the current Windows user's existing LocalAppData installation.
+  if(!/[/\\]AppData[/\\]Local[/\\]EditFlowPro[/\\]?$/i.test(folder.nativePath))throw Error('Choose %LOCALAPPDATA%\\EditFlowPro, not the App/source folder.');
+  try { await folder.getEntry('cep-launcher.json'); }
+  catch (_) { throw Error('Existing cep-launcher.json is missing from this folder.'); }
+  localStorage.setItem(PAIRING_FOLDER,await fs.createPersistentToken(folder));
+  return folder;
+}
+$('autoConnect').addEventListener('click',()=>action(async()=>{
+  stopWatch(); activeJob=''; $('health').textContent='Connecting…';
+  const priorTimeout=client.timeout;
+  try {
+    const folder=await pairingFolder();
+    client.timeout=1500;
+    const connector=new AutoConnector({client,
+      readToken:async()=>{const file=await folder.getEntry('pairing-token.txt');return file.read();},
+      launch:async()=>{
+        const plugin=await fs.getPluginFolder();
+        const launcher=await plugin.getEntry('launcher/Start-EditFlow-Backend.cmd');
+        return uxp.shell.openPath(launcher.nativePath,'Start your installed EditFlow backend locally so the panel can connect.');
+      },
+      wait:ms=>new Promise(resolve=>setTimeout(resolve,ms)),report:status
+    });
+    const h=await connector.connect();
+    $('token').value=''; $('health').textContent=JSON.stringify(h,null,2);
+    status('Backend authenticated · '+h.version);
+  } catch(e) { $('health').textContent='Not connected'; throw e; }
+  finally {client.timeout=priorTimeout;}
+}));
+$('resetPairing').addEventListener('click',()=>action(async()=>{
+  stopWatch(); activeJob=''; client.token=''; localStorage.removeItem(PAIRING_FOLDER);
+  $('health').textContent='Not connected'; status('Folder access forgotten. Use Start & Connect to select again.');
+}));
+$('connect').addEventListener('click',()=>action(async()=>{
+  stopWatch(); activeJob=''; client.pair($('token').value); $('token').value='';
+  $('health').textContent='Checking…';
+  try { const h=await client.health(); $('health').textContent=JSON.stringify(h,null,2); status('Backend authenticated · '+h.version); }
+  catch(e) { $('health').textContent='Not connected'; throw e; }
+}));
+$('inspect').addEventListener('click',()=>action(async()=>{ $('timeline').textContent='Reading…'; try { $('timeline').textContent=JSON.stringify(await inspectTimeline(require('premierepro')),null,2); status('Timeline read complete · 0 changes'); } catch(e) { $('timeline').textContent='Read failed'; throw e; } }));
+$('analyze').addEventListener('click',()=>action(()=>submit('analyze',{paths:[$('media').value.trim()],settings:{threshold:-35,minimum:0.45,before:0.08,after:0.12}})));
+$('transcribe').addEventListener('click',()=>action(()=>submit('transcribe',{path:$('media').value.trim(),language:'ar',word_mode:false})));
+$('sync').addEventListener('click',()=>action(()=>submit('sync',{camera_path:$('camera').value.trim(),mic_path:$('mic').value.trim(),camera_in:0,mic_in:0})));
+$('watch').addEventListener('click',()=>action(()=>watch($('jobId').value.trim())));
+$('cancel').addEventListener('click',()=>action(async()=>{ const id=activeJob||$('jobId').value.trim(); await client.cancel(id); status('Cancellation requested · waiting for worker'); await watch(id); }));
+require('uxp').entrypoints.setup({panels:{editflow:{hide(){stopWatch();},show(){if(activeJob)watch(activeJob);},destroy(){stopWatch();client.token='';}}}});
