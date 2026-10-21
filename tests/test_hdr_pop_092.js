@@ -1,0 +1,22 @@
+'use strict';
+const assert=require('node:assert/strict'),G=require('../uxp/src/color-grade'),V=require('../uxp/src/visual-tools');
+(async()=>{
+ const a=G.gradeFromAnalysis({},'hdr_pop',.75),b=G.gradeFromAnalysis({},'hdr_pop',1);
+ assert.equal(a.saturation,113.5);assert.equal(b.contrast_offset,34);assert.equal(b.highlights,-32);assert.equal(b.shadows,24);
+ assert(a.contrast_offset<b.contrast_offset);assert.deepEqual(Object.keys(G.gradeFromAnalysis({},'natural',1)).sort(),['contrast_offset','exposure_offset','saturation','temperature_offset']);
+ const values=[['Basic Correction',null],['Exposure',0],['Contrast',0],['Temperature',0],['Saturation',100],['Highlights',0],['Shadows',0],['Whites',0],['Blacks',0],['Creative',null],['Shadows',71]];
+ let animated=false;
+ const ps=values.map(([displayName,value])=>({displayName,value,isTimeVarying:()=>animated,getStartValue:async function(){return {value:this.value}},createKeyframe:v=>({v}),createSetValueAction:function(k){return {run:()=>{this.value=k.v}}}}));
+ const fx={getMatchName:async()=> 'AE.ADBE Lumetri',getDisplayName:async()=> 'Lumetri Color',getParamCount:()=>ps.length,getParam:i=>ps[i]};
+ const layer={isAdjustmentLayer:async()=>true,isDisabled:async()=>false,getComponentChain:async()=>({getComponentCount:()=>1,getComponentAtIndex:()=>fx})};
+ const seq={guid:'hdr',getVideoTrackCount:async()=>1,getVideoTrack:async()=>({getTrackItems:async()=>[layer]})};
+ const project={getActiveSequence:async()=>seq,lockedAccess:f=>f(),executeTransaction:f=>{const acts=[];f({addAction:a=>acts.push(a)});acts.forEach(x=>x.run());return true;}};
+ const host={Project:{getActiveProject:async()=>project}};
+ const result=await V.applyColorToTop(host,{guid:'hdr'},{color:b});
+ assert.equal(result.total,8);assert.equal(result.applied.length,6);assert.equal(result.already.length,2);assert.equal(ps[10].value,71);
+ assert.equal(ps[5].value,-32);assert.equal(ps[6].value,24);assert.equal(ps[7].value,10);assert.equal(ps[8].value,-14);
+ const protectedRun=await V.applyColorToTop(host,{guid:'hdr'},{color:a});assert.equal(protectedRun.applied.length,0);
+ const regrade=await V.applyColorToTop(host,{guid:'hdr'},{color:a},{replaceExisting:true});assert.equal(regrade.applied.length,6);
+ animated=true;const animation=await V.applyColorToTop(host,{guid:'hdr'},{color:b},{replaceExisting:true});assert.equal(animation.applied.length,0);
+ console.log('PASS HDR-style Pop: eight controls, strength scaling, Basic-only writes/readback, Re-grade and animation guards; old looks preserved');
+})().catch(e=>{console.error(e);process.exitCode=1});

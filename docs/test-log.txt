@@ -1,0 +1,72 @@
+$ /opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3 -m unittest discover -s tests -p test_*.py -v
+PASS M2.3: pinned preview + replay, independently scrollable controls, 24 presets, deferred animation
+Installed EditFlow 0.9.2
+UXP Developer Tools > Add Plugin:
+/tmp/tmpolfh2czj/state/current/uxp/manifest.json
+Rollback backup: /tmp/tmpolfh2czj/state/backups/20261019-125231
+test_auth_error_does_not_probe_or_start (test_launcher_091.LaunchTests.test_auth_error_does_not_probe_or_start) ... ok
+test_proxy_disabled_and_matching_version_reused (test_launcher_091.LaunchTests.test_proxy_disabled_and_matching_version_reused) ... ok
+test_status_file_no_credentials (test_launcher_091.LaunchTests.test_status_file_no_credentials) ... ok
+test_timeout_on_free_port_allows_start (test_launcher_091.LaunchTests.test_timeout_on_free_port_allows_start) ... ok
+test_timeout_on_occupied_port_never_starts_second (test_launcher_091.LaunchTests.test_timeout_on_occupied_port_never_starts_second) ... ok
+test_fs_api (test_m221_static.HtmlTest.test_fs_api) ... ok
+test_gallery_has_filter_hiding (test_m221_static.HtmlTest.test_gallery_has_filter_hiding) ... ok
+test_presets_and_preview_static (test_m221_static.HtmlTest.test_presets_and_preview_static) ... ok
+test_authenticated_health_and_persistent_token (test_release_090.ReleaseTests.test_authenticated_health_and_persistent_token) ... ok
+test_checksum_failure_changes_nothing (test_release_090.ReleaseTests.test_checksum_failure_changes_nothing) ... ok
+test_real_frame_analysis_and_microphone_cut (test_release_090.ReleaseTests.test_real_frame_analysis_and_microphone_cut) ... ok
+test_update_failure_restores_panel_and_config (test_release_090.ReleaseTests.test_update_failure_restores_panel_and_config) ... ok
+test_update_keeps_runtime_token_and_backs_up (test_release_090.ReleaseTests.test_update_keeps_runtime_token_and_backs_up) ... ok
+test_bad_color_rejected (test_renderer.TestCaptionRenderer.test_bad_color_rejected) ... ok
+test_parse_and_group_arabic (test_renderer.TestCaptionRenderer.test_parse_and_group_arabic) ... ok
+test_styles_ass_safe (test_renderer.TestCaptionRenderer.test_styles_ass_safe) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 1.148s
+
+OK
+
+$ node tests/test_autoconnect_m241.js
+PASS: transient UXP network error retry, launcher fallback, auth failure preservation
+
+$ node tests/test_file_picker_m221.js
+PASS: documented UXP SRT picker requested, valid SRT accepted, 2 cues read
+
+$ node tests/test_hdr_pop_092.js
+PASS HDR-style Pop: eight controls, strength scaling, Basic-only writes/readback, Re-grade and animation guards; old looks preserved
+
+$ node tests/test_m25_visual.js
+PASS: SRT guided sparse zoom, UXP locked action creation, Lumetri insertion + verification, no duplicate effect/grade
+
+$ node tests/test_m261_lumetri_candidates.js
+PASS: two candidates prefer canonical Lumetri Color, verify insertion and idempotence, refuse ambiguous/missing variants
+
+$ node tests/test_m262_color_grade.js
+PASS M2.6.2: visible base looks, native Lumetri control labels, verified Before/After, protected existing grade, explicit Re-grade, disabled layer
+
+$ node tests/test_m264_color_checkbox.js
+PASS M2.6.4: Re-grade checkbox wired, all-already correct, 4 skips diagnosed, 4 updates verified
+
+$ node tests/test_m265_lumetri_groups.js
+PASS M2.6.5: Basic Correction group resolves repeated Lumetri labels; alternative sections protected; safe fallback
+
+$ node tests/test_m26_automatic_layer.js
+PASS: real donor->new highest track, duration resize, Lumetri insert, 3 corrections, no duplicate; zoom timing unchanged at 5%
+
+$ node tests/test_release_090.js
+PASS 0.9.2: refreshed readback, silent write/rejection, Re-grade protection, animation protection, stale identity, offline diagnostics, secret/path redaction
+
+$ node tests/test_visual_apply_m24.js
+PASS: verified transaction paths for inside-nest Motion and top-track Lumetri, previous values protected
+
+$ node tests/test_visual_tools_m24.js
+PASS: nested source snapshot, spacing, restrained zoom, weighted color, safe top-layer refusal
+
+$ node tests/test_workspace.js
+PASS M2.3: 24 preset data, category filtering, pinned scroll routing, delayed smooth replay
+
+$ node tests/test_workspace_m221.js
+PASS M2.3: 24 preset data, category filtering, pinned scroll routing, delayed smooth replay
+
+$ node tests/test_workspace_m23.js
+PASS M2.3: 24 preset data, category filtering, pinned scroll routing, delayed smooth replay

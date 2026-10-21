@@ -1,0 +1,1 @@
+raise SystemExit("This unified update reuses your installed Python/model. Run Install-Update.cmd; see README.md. The original archive did not include its pinned dependency lock, so clean-machine bootstrap is not claimed.")

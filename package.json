@@ -1,0 +1,8 @@
+{
+  "name": "editflow-pro-uxp-migration",
+  "private": true,
+  "version": "0.9.6-dev.0",
+  "scripts": {
+    "test": "node scripts/run_node_tests.js"
+  }
+}
