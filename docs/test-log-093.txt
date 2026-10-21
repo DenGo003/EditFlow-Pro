@@ -1,0 +1,14 @@
+EditFlow Pro 0.9.3 local verification — 2026-10-21
+Host target: Windows Premiere Pro 25.6.2; host not available in this environment.
+
+python3 -m unittest discover -s tests -p 'test_*.py' -q
+Ran 16 tests in 1.856s — OK
+
+for f in tests/*.js; do node "$f" >/dev/null || exit 1; done
+16 Node scripts passed
+
+for f in uxp/*.js uxp/src/*.js; do node --check "$f" || exit 1; done
+python3 -m compileall -q backend scripts uxp/renderer
+Syntax checks passed
+
+One acceptance on real Premiere remains: generated transcript or aligned SRT → Search & Markers → Go → Mark → Undo. Prior color look visual acceptance is still pending.

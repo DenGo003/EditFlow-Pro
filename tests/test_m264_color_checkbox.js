@@ -1,0 +1,27 @@
+'use strict';
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const V=require('../uxp/src/visual-tools');
+const ui=fs.readFileSync(require('node:path').join(__dirname,'../uxp/main.js'),'utf8');
+assert.match(ui,/applyColorToTop\(host,colorAnalysis\.identity,colorGrade,\{replaceExisting:\$\('colorReplaceExisting'\)\.checked\}\)/);
+const num=v=>({value:{value:v}});
+const makeParam=(label,start)=>({displayName:label,current:start,isTimeVarying:()=>false,getStartValue:async function(){return num(this.current);},createKeyframe:v=>({value:v}),createSetValueAction:function(k){return{run:()=>{this.current=k.value;}}}});
+const ps=[makeParam('Exposure',.15),makeParam('Contrast',9),makeParam('Temperature',4),makeParam('Saturation',105)];
+const fx={getMatchName:async()=> 'AE.ADBE Lumetri',getDisplayName:async()=> 'Lumetri Color',getParamCount:()=>ps.length,getParam:i=>ps[i]};
+const item={isAdjustmentLayer:async()=>true,isDisabled:async()=>false,getComponentChain:async()=>({getComponentCount:()=>1,getComponentAtIndex:()=>fx})};
+const seq={guid:'m264',getVideoTrackCount:async()=>1,getVideoTrack:async()=>({getTrackItems:async()=>[item]})};
+const project={getActiveSequence:async()=>seq,lockedAccess:f=>f(),executeTransaction:f=>{const a=[];f({addAction:x=>a.push(x)});for(const x of a)x.run();return true}};
+const ppro={Project:{getActiveProject:async()=>project}};
+(async()=>{
+ const same={color:{exposure_offset:.15,contrast_offset:9,temperature_offset:4,saturation:105}};
+ const sameResult=await V.applyColorToTop(ppro,{guid:'m264'},same);
+ assert.equal(sameResult.applied.length,0);assert.equal(sameResult.already.length,4);assert.equal(sameResult.skipped,0);
+ assert.equal(sameResult.total,4);assert.equal(sameResult.diagnostics.availableLabels.length,4);
+ const next={color:{exposure_offset:0,contrast_offset:17,temperature_offset:-3,saturation:96}};
+ const protect=await V.applyColorToTop(ppro,{guid:'m264'},next);
+ assert.equal(protect.applied.length,0);assert.equal(protect.skipped,4);
+ const grade=await V.applyColorToTop(ppro,{guid:'m264'},next,{replaceExisting:true});
+ assert.equal(grade.applied.length,4);assert.equal(grade.skipped,0);assert.equal(grade.regradeRequested,true);
+ assert.equal(ps[1].current,17);
+ console.log('PASS M2.6.4: Re-grade checkbox wired, all-already correct, 4 skips diagnosed, 4 updates verified');
+})().catch(e=>{console.error(e);process.exitCode=1});

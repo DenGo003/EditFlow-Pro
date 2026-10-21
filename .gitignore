@@ -9,6 +9,7 @@ __pycache__/
 *token*
 *secret*
 cep-launcher.json
+package-manifest.json
 outputs/
 Outputs/
 models/
@@ -30,4 +31,9 @@ models/
 Thumbs.db
 
 !legacy/cep/CSXS/manifest.xml
+!plugin/CSXS/
+!plugin/CSXS/manifest.xml
+!uxp/assets/
+!uxp/assets/sfx/
+!uxp/assets/sfx/*.wav
 artifacts/

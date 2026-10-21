@@ -306,4 +306,4 @@ def transcribe(path,model_dir,language,word_mode,folder,update,cancel,ffmpeg='ff
     if not selected: raise ValueError('No speech detected. Try another file or verify audio levels.')
     text=validate_srt(srt(selected)); target=folder/'captions.srt'; target.write_text(text,encoding='utf-8-sig')
     (folder/'transcript.json').write_text(json.dumps({'language':info.language,'segments':cues,'words':words},ensure_ascii=False,indent=2),encoding='utf-8')
-    return {'srt':str(target),'text':text,'language':info.language,'cues':len(selected)}
+    return {'srt':str(target),'text':text,'language':info.language,'cues':len(selected),'words':words}

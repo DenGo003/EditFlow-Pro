@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ExtensionManifest Version="7.0" ExtensionBundleId="com.editflow.pro.cep" ExtensionBundleVersion="0.8.2" ExtensionBundleName="EditFlow Pro">
+  <ExtensionList><Extension Id="com.editflow.pro.cep.panel" Version="0.8.2"/></ExtensionList>
+  <ExecutionEnvironment>
+    <HostList><Host Name="PPRO" Version="[25.0,99.9]"/></HostList>
+    <LocaleList><Locale Code="All"/></LocaleList>
+    <RequiredRuntimeList><RequiredRuntime Name="CSXS" Version="12.0"/></RequiredRuntimeList>
+  </ExecutionEnvironment>
+  <DispatchInfoList>
+    <Extension Id="com.editflow.pro.cep.panel">
+      <DispatchInfo>
+        <Resources><MainPath>./index.html</MainPath><ScriptPath>./host/import.jsx</ScriptPath><CEFCommandLine><Parameter>--enable-nodejs</Parameter></CEFCommandLine></Resources>
+        <Lifecycle><AutoVisible>true</AutoVisible></Lifecycle>
+        <UI><Type>Panel</Type><Menu>EditFlow Pro</Menu><Geometry><Size><Width>720</Width><Height>780</Height></Size><MinSize><Width>340</Width><Height>420</Height></MinSize></Geometry></UI>
+      </DispatchInfo>
+    </Extension>
+  </DispatchInfoList>
+</ExtensionManifest>

@@ -1,8 +1,5 @@
-name: Publish EditFlow Pro Update
+name: Publish reviewed EditFlow unified release
 on:
-  push:
-    paths:
-      - 'staging/*.zip'
   workflow_dispatch:
 
 permissions:
@@ -19,54 +16,61 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Validate newest staged package
-        id: prepare
-        shell: bash
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Require reviewed source and Windows host acceptance
         run: |
-          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
           python3 - <<'PY'
-          import glob, os, re, shutil, zipfile
-          candidates = []
-          for path in glob.glob('staging/*.zip'):
-              with zipfile.ZipFile(path) as z:
-                  infos = z.infolist()
-                  names = [i.filename for i in infos]
-                  if len(infos)>100 or sum(i.file_size for i in infos)>50_000_000:
-                      raise SystemExit(f'Invalid ZIP size: {path}')
-                  if len(names)!=len(set(names)) or any(n.startswith('/') or '..' in n.split('/') or '\\' in n for n in names):
-                      raise SystemExit(f'Unsafe ZIP entries: {path}')
-                  required={'plugin/CSXS/manifest.xml','plugin/main.js','plugin/index.html','backend/server.py'}
-                  if not required.issubset(names): raise SystemExit(f'Missing required files: {path}')
-                  forbidden=('.env','cep-launcher.json','pairing','token','secret','.prproj','.wav','.mp4','.pkl')
-                  if any(any(s in n.lower() for s in forbidden) for n in names):
-                      raise SystemExit(f'Potentially sensitive content: {path}')
-                  manifest=z.read('plugin/CSXS/manifest.xml').decode('utf-8')
-                  match=re.search(r'ExtensionBundleVersion="([0-9]+\.[0-9]+\.[0-9]+)"', manifest)
-                  if not match: raise SystemExit(f'Invalid version: {path}')
-                  version=match.group(1)
-                  candidates.append((tuple(map(int,version.split('.'))),version,path))
-          if not candidates: raise SystemExit('No staged release packages')
-          _, version, source=max(candidates)
-          shutil.copyfile(source,'EditFlow-Pro-Update.zip')
-          print('Publishing',version,'from',source)
-          with open(os.environ['GITHUB_OUTPUT'],'a') as out: out.write('version='+version+'\n')
+          import json
+          data=json.load(open('release.json',encoding='utf-8'))
+          if data.get('targetPremiere') != '25.6.2' or data.get('hostVerified') is not True:
+              raise SystemExit('Windows/Premiere 25.6.2 acceptance is still pending; no production release')
           PY
-          sha256sum EditFlow-Pro-Update.zip > EditFlow-Pro-Update.zip.sha256
-      - name: Publish GitHub release
-        shell: bash
+      - name: Install test dependencies
+        run: |
+          python -m pip install numpy==2.3.5
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      - name: Verify unified source
+        run: |
+          python -m unittest discover -s tests -p 'test_*.py' -v
+          npm test
+      - name: Build and check unified ZIP
+        id: prepare
+        run: |
+          python scripts/build_release.py
+          python - <<'PY'
+          import json, os, pathlib
+          from backend.update_manager import inspect_bundle
+          version=json.loads(pathlib.Path('release.json').read_text())['version']
+          archive=pathlib.Path('..') / f'EditFlow-Pro-{version}-Unified.zip'
+          inspect_bundle(archive,version,'0.0.0')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+              out.write(f'version={version}\n')
+          PY
+          VERSION=$(python -c "import json; print(json.load(open('release.json'))['version'])")
+          cd ..
+          sha256sum "EditFlow-Pro-${VERSION}-Unified.zip" > "EditFlow-Pro-${VERSION}-Unified.zip.sha256"
+      - name: Publish versioned GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ steps.prepare.outputs.version }}
         run: |
           set -euo pipefail
+          test ! -z "$RELEASE_VERSION"
           TAG="v${RELEASE_VERSION}"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release already exists: $TAG"
-            exit 0
+            exit 1
           fi
           gh release create "$TAG" \
-            EditFlow-Pro-Update.zip \
-            EditFlow-Pro-Update.zip.sha256 \
+            "../EditFlow-Pro-${RELEASE_VERSION}-Unified.zip" \
+            "../EditFlow-Pro-${RELEASE_VERSION}-Unified.zip.sha256" \
             --title "EditFlow Pro $TAG" \
-            --notes "Experimental release. Back up Premiere project and test on a duplicate sequence." \
-            --latest
+            --notes "Reviewed unified update for Premiere Pro 25.6.2." \
+            --target main --latest

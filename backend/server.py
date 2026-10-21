@@ -1,10 +1,10 @@
 """Authenticated loopback-only JSON API. One media worker, no cloud calls."""
 from __future__ import annotations
-import argparse, copy, json, os, secrets, shutil, threading, uuid, subprocess, sys
+import argparse, copy, json, os, secrets, shutil, threading, uuid, subprocess, sys, zipfile
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from . import core, sync, timeline_cut, timeline_caption, visual_ai
+from . import core, sync, timeline_cut, timeline_caption, visual_ai, update_manager
 
 class Service:
     def __init__(self,root,ffmpeg='ffmpeg',ffprobe='ffprobe',token=None):
@@ -126,10 +126,14 @@ def make_handler(service):
             if not self.authorized(): return
             try:
                 if self.path=='/health':
-                    self.reply(200,{'version':'0.8.2-nested-visual-scheduled-updates','model_ready':(service.root/'models/small/model.bin').is_file(),
+                    self.reply(200,{'version':'0.9.6','model_ready':(service.root/'models/small/model.bin').is_file(),
                                     'ffmpeg':bool(shutil.which(service.ffmpeg)),'ffprobe':bool(shutil.which(service.ffprobe)),
-                                    'output_root':str(service.work_root/'outputs')})
+                                    'output_root':str(service.work_root/'outputs'),'protocol':1,'target_premiere':'25.6.2'})
                 elif self.path.startswith('/jobs/'): self.reply(200,service.status(self.path.split('/')[-1]))
+                elif self.path=='/update/channel': self.reply(200,{'url':update_manager.channel(service.root)})
+                elif self.path=='/update/status':
+                    path=service.root/'update-status.json'
+                    self.reply(200,json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'state':'idle'})
                 else: self.reply(404,{'error':'Not found'})
             except (ValueError,KeyError) as e: self.reply(400,{'error':str(e)})
         def do_POST(self):
@@ -143,9 +147,20 @@ def make_handler(service):
                 if self.path=='/jobs': result=service.start(data['kind'],data)
                 elif self.path=='/cancel': result=service.cancel(data['id'])
                 elif self.path=='/save-srt': result=service.save(data['id'],data['text'])
+                elif self.path=='/update/channel': result=update_manager.set_channel(service.root,data.get('url',''))
+                elif self.path=='/update/apply':
+                    with service.lock:
+                        if any(j['state'] in ('queued','running') for j in service.jobs.values()):
+                            raise ValueError('Finish the current job before updating')
+                    staged=update_manager.prepare(service.root,'0.9.6')
+                    result=update_manager.arm(service.root,staged) if staged['state']=='staged' else staged
+                    if staged['state']=='staged':
+                        self.reply(200,result)
+                        threading.Thread(target=self.server.shutdown,daemon=True).start()
+                        return
                 else: self.reply(404,{'error':'Not found'}); return
                 self.reply(200,result)
-            except (ValueError,KeyError,TypeError,OSError) as e: self.reply(400,{'error':str(e)})
+            except (ValueError,KeyError,TypeError,OSError,RuntimeError,zipfile.BadZipFile) as e: self.reply(400,{'error':str(e)})
     return Handler
 
 def persistent_token(root):
@@ -170,7 +185,7 @@ def main():
     os.environ['HF_HUB_OFFLINE']='1'; os.environ['HF_HUB_DISABLE_TELEMETRY']='1'
     args=parser.parse_args(); service=Service(args.root,args.ffmpeg,args.ffprobe, persistent_token(args.root))
     server=ThreadingHTTPServer(('127.0.0.1',args.port),make_handler(service))
-    print(f'EditFlow Pro 0.5.0 Timeline Test | http://127.0.0.1:{args.port}\nPairing token (stable for this Windows user):\n{service.token}\nOutputs: {service.work_root / "outputs"}\nKeep this window open. Ctrl+C stops the backend.',flush=True)
+    print(f'EditFlow Pro 0.9.6 | http://127.0.0.1:{args.port}\nPairing: use Start & Connect in the panel\nOutputs: {service.work_root / "outputs"}\nKeep this window open. Ctrl+C stops the backend.',flush=True)
     try: server.serve_forever()
     except KeyboardInterrupt: pass
     finally:

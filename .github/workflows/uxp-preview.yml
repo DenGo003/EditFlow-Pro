@@ -3,7 +3,7 @@ on:
   push:
     branches: ['feat/uxp-*']
   pull_request:
-    paths: ['uxp/**', 'backend/**', 'tests/**', 'scripts/build_uxp_preview.py', '.github/workflows/uxp-preview.yml']
+    paths: ['uxp/**', 'backend/**', 'tests/**', 'scripts/**', 'release.json', '.github/workflows/uxp-preview.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,9 +21,10 @@ jobs:
       - run: python -m pip install numpy==2.3.5
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: npm test
-      - run: python -m unittest tests.test_baseline -v
-      - run: python scripts/build_uxp_preview.py
+      - run: python -m unittest discover -s tests -p "test_*.py" -v
+      - run: python scripts/build_release.py
+      - run: mkdir -p artifacts && cp ../EditFlow-Pro-*-Unified.zip artifacts/
       - uses: actions/upload-artifact@v4
         with:
-          name: EditFlow-UXP-M1-development-source
-          path: artifacts/*
+          name: EditFlow-unified-development-preview
+          path: artifacts/*.zip
